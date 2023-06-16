@@ -1,3 +1,8 @@
+module LinStab
+
+export
+    lin_stab
+
 ## define stability functions
 
 function lin_stab(U::Vector{Float64},V::Vector{Float64},beta,eta,Nx::Int64,Ny::Int64,rho::Vector{Float64},f0::Float64,Lx::Float64,Ly::Float64)
@@ -248,3 +253,5 @@ function find_growth(evecs_all,evals_all,Nx,Ny,Nz)
 
     return evecs,evals,max_evec,max_eval
 end
+
+end # (module)
