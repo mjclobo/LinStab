@@ -4,7 +4,7 @@ using FFTW, LinearAlgebra, Statistics, Peaks
 
 ## define stability functions
 
-function lin_stab(U::Vector{Float64},V::Vector{Float64},H,beta,eta,Nx::Int64,Ny::Int64,rho::Vector{Float64},f0::Float64,g,Lx::Float64,Ly::Float64)
+function lin_stab(U::Vector{Float64},V::Vector{Float64},H,beta,eta,Nx::Int64,Ny::Int64,rho::Vector{Float64},f0::Float64,g,Lx::Float64,Ly::Float64;rigid_lid=true)
     # U: (Nx x Nz) vector of zonal mean background velocity
     # V: (Ny x Nz) vector of meridional mean background velocity
     # beta: 
@@ -21,7 +21,7 @@ function lin_stab(U::Vector{Float64},V::Vector{Float64},H,beta,eta,Nx::Int64,Ny:
     # k2 = k_x.^2 + k_y.^2            # this is for an isotropic wavenumber grid only (i.e. Nx=Ny)
 
     # define stretching matrix
-    S = calc_stretching_mat(Nz,rho,f0,H,rho[1],g)
+    S = calc_stretching_mat(Nz,rho,f0,H,rho[1],g,rigid_lid)
 
     # change dimensions of U and V to match domain size
     U2 = zeros(1,Nz); U2[:] = U; U2 = repeat(U2,outer=(Ny,1))
@@ -38,7 +38,7 @@ function lin_stab(U::Vector{Float64},V::Vector{Float64},H,beta,eta,Nx::Int64,Ny:
     evecs_all,evals_all = calc_lin_stab(Qy,Qx,U,V,S,k_x,k_y,Nx,Ny,Nz)
 
     # keep largest growth rates per wavenumber
-    evecs,evals,max_evec,max_eval = find_growth(evecs_all,evals_all,Nx,Ny,Nz)
+    evecs,evals,max_evec_mag,max_evec_phase,max_eval = find_growth(evecs_all,evals_all,Nx,Ny,Nz)
 
     # def rad
     evals_S = eigvals(-S); evecs_S = eigvecs(-S)
@@ -49,7 +49,7 @@ function lin_stab(U::Vector{Float64},V::Vector{Float64},H,beta,eta,Nx::Int64,Ny:
     r_d[1] = sqrt(g*sum(H))/f0
     r_d[2:end] = @. sqrt(Complex(evals_S[sort_ind[2:end]]))^-1
 
-    return fftshift(evecs),fftshift(evals),max_evec,max_eval,fftshift(k_x),fftshift(k_y),mean(Qx[1,:,:],dims=1),mean(Qy[1,:,:],dims=1),r_d
+    return fftshift(evecs),fftshift(evals),max_evec_mag,max_evec_phase,max_eval,fftshift(k_x),fftshift(k_y),mean(Qx[1,:,:],dims=1),mean(Qy[1,:,:],dims=1),r_d
 end
 
 # function lin_stab(U::Vector{Float64},V::Vector{Float64},H,beta,eta,Nx::Int64,Ny::Int64,rho::Vector{Float64},f0::Float64,g,Lx::Float64,Ly::Float64,Qy)
@@ -154,11 +154,16 @@ function gp(rho,rho0,g)
     return g_prime
 end
 
-function calc_stretching_mat(Nz,rho,f0,H,rho0,g)
+function calc_stretching_mat(Nz,rho,f0,H,rho0,g,rigid_lid)
     #
     S = zeros((Nz,Nz,))
 
-    alpha = 0
+    if rigid_lid
+        alpha = 0
+    else
+        alpha = -f0^2/g/H[1]
+    end
+
     eta_b_x = 0
 
     S[1,1] = -f0^2/H[1]/gp(rho[1:2],rho0,g) + alpha
@@ -220,7 +225,7 @@ function find_growth(evecs_all,evals_all,Nx,Ny,Nz)
 
     for i=1:Nx
         for j=1:Ny
-            indMax       = argmax(imag(evals_all[i,j,:]))
+            indMax       = argmax(imag(evals_all[i,j,:]))       # find max growth amongst the Nz modes at a given wavenumber..
             evals[i,j]   = evals_all[i,j,indMax]
             evecs[i,j,:] = evecs_all[i,j,:,indMax]
         end
@@ -232,9 +237,10 @@ function find_growth(evecs_all,evals_all,Nx,Ny,Nz)
 
     max_eval = sigma[indMax]
 
-    max_evec = abs.(evecs[indMax,:])
+    max_evec_mag = abs.(evecs[indMax,:])
+    max_evec_phase = angle.(evecs[indMax,:])
 
-    return evecs,evals,max_evec,max_eval
+    return evecs,evals,max_evec_mag,max_evec_phase,max_eval
 end
 
 """
@@ -257,6 +263,11 @@ function calc_growth(t, E_in)
   sigma = mv[2]/2
 
   return sigma
+end
+
+
+function find_kx_psi_vert(k_x,evecs,)
+
 end
 
 end # (module)
