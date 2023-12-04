@@ -253,16 +253,28 @@ function calc_growth(t, E_in)
   E_tot = sum(E_in,dims=2)
   min_ind,trash = Peaks.findminima(diff(E_tot[:],dims=1))
   f = min_ind[end] + 1 # get first time index from the last renormalization cycle
-  t, KE1_new = t[f:end], E_in[f:end,1]           # construct time series from last section of growth in upper layer
-  n = size(t)[1]
-  d = Matrix(reshape(log.(KE1_new), (1, n)))
-  gm = Matrix(reshape(t, (1, n)))
-  Gm = Matrix([ones(n, 1) gm'])
-  GmT = Gm'
-  mv = inv(GmT*Gm)*(GmT*d')
-  sigma = mv[2]/2
+  t, KE1_new, KE2_new, KE3_new, PE32_new, PE52_new = t[f:end], E_in[f:end,1], E_in[f:end,2], E_in[f:end,3], E_in[f:end,4], E_in[f:end,5]     # construct time series from last section of growth in upper layer
+  
+  sigma_KE1  = growth_rate(t,KE1_new)
+  sigma_KE2  = growth_rate(t,KE2_new)
+  sigma_KE3  = growth_rate(t,KE3_new)
+  sigma_PE32 = growth_rate(t,PE32_new)
+  sigma_PE52 = growth_rate(t,PE52_new)
 
-  return sigma
+  return [sigma_KE1, sigma_KE2, sigma_KE3, sigma_PE32, sigma_PE52]
+end
+
+function growth_rate(t,E)
+
+    n = size(t)[1]
+    d = Matrix(reshape(log.(E), (1, n)))
+    gm = Matrix(reshape(t, (1, n)))
+    Gm = Matrix([ones(n, 1) gm'])
+    GmT = Gm'
+    mv = inv(GmT*Gm)*(GmT*d')
+    sigma = mv[2]/2
+
+    return sigma
 end
 
 
