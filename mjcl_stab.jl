@@ -8,37 +8,43 @@ function lin_stab(U::Vector{Float64},V::Vector{Float64},H,beta,eta,Nx::Int64,Ny:
     # U: (Nx x Nz) vector of zonal mean background velocity
     # V: (Ny x Nz) vector of meridional mean background velocity
     # beta: 
-    # 
+    # eta: The dimensional slope of the meridionally-sloping topography..for now
 
     Nz = length(rho)
+
+    # eta gets factor of f/H in S definition function! 
 
     # define wavenumbers
     k_x = reshape(fftfreq(Nx, 2π/Lx*Nx),(1,Nx))
     k_y = reshape(fftfreq(Ny, 2π/Ly*Ny),(1,Ny))
 
-    # k_x,k_y = wavenumber_grid(Nx,Ny,Lx,Ly)
+    N_x = Nx
+    N_xr = round(Int,Nx/2)
+    k_xr = k_x[1:N_xr]
+
+    # k_x,k_y,k_xr = wavenumber_grid(Nx,Ny,Lx,Ly)
 
     # k2 = k_x.^2 + k_y.^2            # this is for an isotropic wavenumber grid only (i.e. Nx=Ny)
 
     # define stretching matrix
-    S = calc_stretching_mat(Nz,rho,f0,H,rho[1],g,rigid_lid)
+    S = calc_stretching_mat(Nz,rho,f0,H,rho[1],g,rigid_lid,eta)
 
     # change dimensions of U and V to match domain size
     U2 = zeros(1,Nz); U2[:] = U; U2 = repeat(U2,outer=(Ny,1))
     U = zeros(1,Ny,Nz); U[1,:,:] = U2
 
-    V2 = zeros(1,Nz); V2[:] = V; V2 = repeat(V2,outer=(Nx,1))
-    V = zeros(1,Nx,Nz); V[1,:,:] = V2
+    V2 = zeros(1,Nz); V2[:] = V; V2 = repeat(V2,outer=(N_xr,1))
+    V = zeros(1,N_xr,Nz); V[1,:,:] = V2
 
     # define background QG PV gradient
     Qy = calc_PV_grad_y(U,beta,eta,Ny,Nz,k_y,S)
-    Qx = calc_PV_grad_x(V,eta,Nx,Nz,k_x,S)
+    Qx = calc_PV_grad_x(V,eta,N_xr,Nz,k_xr,S)
 
     # perform linear stability analysis
-    evecs_all,evals_all = calc_lin_stab(Qy,Qx,U,V,S,k_x,k_y,Nx,Ny,Nz)
+    evecs_all,evals_all = calc_lin_stab(Qy,Qx,U,V,S,k_xr,k_y,N_xr,Ny,Nz)
 
     # keep largest growth rates per wavenumber
-    evecs,evals,max_evec_mag,max_evec_phase,max_eval = find_growth(evecs_all,evals_all,Nx,Ny,Nz)
+    evecs,evals,max_evec_mag,max_evec_phase,max_eval = find_growth(evecs_all,evals_all,N_xr,Ny,Nz)
 
     # def rad
     evals_S = eigvals(-S); evecs_S = eigvecs(-S)
@@ -49,7 +55,11 @@ function lin_stab(U::Vector{Float64},V::Vector{Float64},H,beta,eta,Nx::Int64,Ny:
     r_d[1] = sqrt(g*sum(H))/f0
     r_d[2:end] = @. sqrt(Complex(evals_S[sort_ind[2:end]]))^-1
 
-    return fftshift(evecs),fftshift(evals),max_evec_mag,max_evec_phase,max_eval,fftshift(k_x),fftshift(k_y),mean(Qx[1,:,:],dims=1),mean(Qy[1,:,:],dims=1),r_d
+    # normalizing eigenvectors
+    norm_fact = sqrt.(sum(H) ./ (H .* sum( evecs_S .* evecs_S, dims=1)))
+    evecs_S = norm_fact .* evecs_S
+
+    return fftshift(evecs,[2]),fftshift(evals,[2]),max_evec_mag,max_evec_phase,max_eval,fftshift(k_x),fftshift(k_y),mean(Qx[1,:,:],dims=1),mean(Qy[1,:,:],dims=1),r_d,evecs_S
 end
 
 # function lin_stab(U::Vector{Float64},V::Vector{Float64},H,beta,eta,Nx::Int64,Ny::Int64,rho::Vector{Float64},f0::Float64,g,Lx::Float64,Ly::Float64,Qy)
@@ -100,13 +110,17 @@ function wavenumber_grid(Nx,Ny,Lx,Ly)
 
     nk_x = Nx; nk_y = Ny
 
-    k_x = reshape(LinRange(-2*pi/Lx*nk_x,2*pi/Lx*nk_x,nk_x),(1,Nx))
-    k_y = reshape(LinRange(-2*pi/Ly*nk_y,2*pi/Ly*nk_y,nk_y),(1,Ny))
+    nkr_x = round(Int,Nx/2)
 
-    # k_x = LinRange(0.,2*pi/Lx*nk_x,nk_x)
-    # k_y = LinRange(0.,2*pi/Ly*nk_y,nk_y)
+    # k_x = reshape(LinRange(-2*pi/Lx*nk_x,2*pi/Lx*nk_x,nk_x),(1,Nx))
+    # k_y = reshape(LinRange(-2*pi/Ly*nk_y,2*pi/Ly*nk_y,nk_y),(1,Ny))
 
-    return k_x,k_y
+    k_x = (fftfreq(Nx, 2π/Lx*Nx))
+    k_y = (fftfreq(Ny, 2π/Ly*Ny))
+
+    k_xr = k_x[1:nkr_x]
+
+    return k_x,k_y,k_xr
 end
 
 function calc_PV_grad_y(U,beta,eta,Ny::Int64,Nz::Int64,k_y,S)
@@ -115,7 +129,7 @@ function calc_PV_grad_y(U,beta,eta,Ny::Int64,Nz::Int64,k_y,S)
     # k_y is (Ny x 1)
     # 
 
-    Uyy = real.(ifft(-k_y.^2 .* fft(U)))
+    # Uyy = real.(ifft(-k_y.^2 .* fft(U)))
 
     # Uyy = repeat(Uyy, outer=(Nx, 1, 1))
 
@@ -126,7 +140,10 @@ function calc_PV_grad_y(U,beta,eta,Ny::Int64,Nz::Int64,k_y,S)
         F[1,i,:] = S * U[1,i,:]
     end
 
-    Q_y = beta .- (Uyy .+ F)
+    # Q_y = beta .- (Uyy .+ F)
+    Q_y = beta .- F
+
+    Q_y[:,:,end] = Q_y[:,:,end] .+ eta
 
     return Q_y
 end
@@ -134,16 +151,18 @@ end
 function calc_PV_grad_x(V,eta,Nx::Int64,Nz::Int64,k_x,S)
     # calculates PV gradients in one zonal direction
 
-    Vxx = real.(ifft(k_x.^2 .* fft(V)))
+    # Vxx = real.(ifft(k_x.^2 .* fft(V)))
 
-    # Q_y = zeros(Nx,Nz)
+    # Q_x = zeros(Nx,Nz)
 
     F = zeros(size(V))
     for i=1:Nx
         F[1,i,:] = S * V[1,i,:]
     end
 
-    Q_x = Vxx .+ F
+    # Q_x = Vxx .+ F
+
+    Q_x = F
 
     return Q_x
 end
@@ -154,7 +173,7 @@ function gp(rho,rho0,g)
     return g_prime
 end
 
-function calc_stretching_mat(Nz,rho,f0,H,rho0,g,rigid_lid)
+function calc_stretching_mat(Nz,rho,f0,H,rho0,g,rigid_lid,eta)
     #
     S = zeros((Nz,Nz,))
 
@@ -164,7 +183,7 @@ function calc_stretching_mat(Nz,rho,f0,H,rho0,g,rigid_lid)
         alpha = -f0^2/g/H[1]
     end
 
-    eta_b_x = 0
+    eta_b_x = (f0/H[Nz])*eta
 
     S[1,1] = -f0^2/H[1]/gp(rho[1:2],rho0,g) + alpha
     S[1,2] = f0^2/H[1]/gp(rho[1:2],rho0,g)
@@ -182,6 +201,7 @@ function calc_stretching_mat(Nz,rho,f0,H,rho0,g,rigid_lid)
 end
 
 function calc_lin_stab(Qy,Qx,U,V,S,k_x,k_y,Nx,Ny,Nz)
+    Nx = length(k_x)
     evecs = zeros(Nx,Ny,Nz,Nz) .+ 0im
     evals = zeros(Nx,Ny,Nz) .+ 0im
     k2    = zeros(Nx,Ny)
@@ -201,8 +221,10 @@ function calc_lin_stab(Qy,Qx,U,V,S,k_x,k_y,Nx,Ny,Nz)
 
                 k2[i,j] = (k_x[i]^2 + k_y[j]^2)
 
-                evecs[i,j,:,:] = eigvecs(B2)
-                evals[i,j,:] = eigvals(B2)
+                eigB2 = eigen(B2)
+                evecs[i,j,:,:] = eigB2.vectors
+                evals[i,j,:] = eigB2.values
+
             end
 
         end
@@ -220,12 +242,13 @@ function make_diag(array_in)
 end
 
 function find_growth(evecs_all,evals_all,Nx,Ny,Nz)
-    # 
+    # for LSA
+    
     evecs = zeros(Nx,Ny,Nz) .+ 0im; evals = zeros(Nx,Ny) .+ 0im
 
     for i=1:Nx
         for j=1:Ny
-            indMax       = argmax(imag(evals_all[i,j,:]))       # find max growth amongst the Nz modes at a given wavenumber..
+            indMax       = argmax(imag(evals_all[i,j,:]))       # find max growth amongst the Nz modes at a given wavenumber..why
             evals[i,j]   = evals_all[i,j,indMax]
             evecs[i,j,:] = evecs_all[i,j,:,indMax]
         end
@@ -233,12 +256,14 @@ function find_growth(evecs_all,evals_all,Nx,Ny,Nz)
 
     sigma = imag(evals)
 
+    # k_x[60] = -k_x[6] for i = j = 3 w.r.t. alpha gamma
+
     indMax = argmax(sigma)
 
     max_eval = sigma[indMax]
 
     max_evec_mag = abs.(evecs[indMax,:])
-    max_evec_phase = angle.(evecs[indMax,:])
+    max_evec_phase = atan.(imag(evecs[indMax,:]),real(evecs[indMax,:]))
 
     return evecs,evals,max_evec_mag,max_evec_phase,max_eval
 end
