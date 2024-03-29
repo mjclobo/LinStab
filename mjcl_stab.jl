@@ -37,8 +37,8 @@ function lin_stab(U::Vector{Float64},V::Vector{Float64},H,beta,eta,Nx::Int64,Ny:
     V = zeros(1,N_xr,Nz); V[1,:,:] = V2
 
     # define background QG PV gradient
-    Qy = calc_PV_grad_y(U,beta,eta,Ny,Nz,k_y,S)
-    Qx = calc_PV_grad_x(V,eta,N_xr,Nz,k_xr,S)
+    Qy = calc_PV_grad_y(U,beta,(f0/H[end])*eta,Ny,Nz,k_y,S)
+    Qx = calc_PV_grad_x(V,0,N_xr,Nz,k_xr,S)
 
     # perform linear stability analysis
     evecs_all,evals_all = calc_lin_stab(Qy,Qx,U,V,S,k_xr,k_y,N_xr,Ny,Nz)
@@ -308,3 +308,4 @@ function find_kx_psi_vert(k_x,evecs,)
 end
 
 end # (module)
+
